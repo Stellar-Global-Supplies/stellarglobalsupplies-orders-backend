@@ -2,11 +2,14 @@
  * Minimal AWS S3 helper for CF Workers — fetch() + AWS Signature V4.
  * Replaces @aws-sdk/client-s3 and @aws-sdk/s3-request-presigner entirely.
  * Implements: PutObject, GetObject, presigned GET URL.
+ *
+ * FIX: canonical path must URI-encode each path segment individually.
+ * S3 keys with spaces or special chars were causing SignatureDoesNotMatch.
  */
 
 const PRESIGN_TTL = 7 * 24 * 60 * 60; // 7 days
 
-// ── Crypto (Web Crypto API — native in CF Workers) ────────────────────────────
+// ── Crypto ────────────────────────────────────────────────────────────────────
 
 async function hmacSHA256(key, data) {
   const k = await crypto.subtle.importKey(
@@ -38,6 +41,15 @@ async function signingKey(secret, date, region) {
   return hmacSHA256(k, "aws4_request");
 }
 
+/**
+ * URI-encode each path segment individually (do NOT encode the "/" separators).
+ * AWS Sig V4 requires this for canonical path construction.
+ * encodeURIComponent encodes everything including "/", so we split and rejoin.
+ */
+function canonicalPath(key) {
+  return "/" + key.split("/").map(seg => encodeURIComponent(seg)).join("/");
+}
+
 async function sign({ method, url, extraHeaders = {}, body = null, env }) {
   const region  = env.AWS_REGION || "us-east-1";
   const now     = new Date();
@@ -50,16 +62,17 @@ async function sign({ method, url, extraHeaders = {}, body = null, env }) {
     ? await sha256hex(body instanceof ArrayBuffer ? body : body)
     : "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
-  const hdrs = { host, "x-amz-date": amzDate, "x-amz-content-sha256": bodyHash, ...extraHeaders };
-  const sortedKeys   = Object.keys(hdrs).sort();
-  const canonHdrs    = sortedKeys.map(k => `${k}:${hdrs[k]}`).join("\n") + "\n";
-  const signedHdrs   = sortedKeys.join(";");
-  const canonQuery   = Array.from(parsed.searchParams.entries())
+  const hdrs       = { host, "x-amz-date": amzDate, "x-amz-content-sha256": bodyHash, ...extraHeaders };
+  const sortedKeys = Object.keys(hdrs).sort();
+  const canonHdrs  = sortedKeys.map(k => `${k}:${hdrs[k]}`).join("\n") + "\n";
+  const signedHdrs = sortedKeys.join(";");
+  const canonQuery = Array.from(parsed.searchParams.entries())
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
     .join("&");
 
-  const canonReq = [method, parsed.pathname, canonQuery, canonHdrs, signedHdrs, bodyHash].join("\n");
+  // Use canonicalPath() — encodes each segment, preserves "/" separators
+  const canonReq = [method, canonicalPath(decodeURIComponent(parsed.pathname.slice(1))), canonQuery, canonHdrs, signedHdrs, bodyHash].join("\n");
   const scope    = `${date}/${region}/s3/aws4_request`;
   const sts      = ["AWS4-HMAC-SHA256", amzDate, scope, await sha256hex(canonReq)].join("\n");
   const sig      = toHex(await hmacSHA256(await signingKey(env.AWS_SECRET_ACCESS_KEY, date, region), sts));
@@ -87,10 +100,10 @@ export async function putToS3(key, body, contentType, env) {
 export async function fetchFromS3(key, env) {
   const bucket = env.INVOICE_BUCKET;
   const region = env.AWS_REGION || "us-east-1";
-  const url    = `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
+  const url    = `https://${bucket}.s3.${region}.amazonaws.com/${canonicalPath(key)}`;
   const { headers } = await sign({ method: "GET", url, env });
   const res = await fetch(url, { method: "GET", headers });
-  if (!res.ok) throw new Error(`S3 GetObject (${res.status})`);
+  if (!res.ok) throw new Error(`S3 GetObject (${res.status}): ${await res.text()}`);
   return {
     buffer:      await res.arrayBuffer(),
     contentType: res.headers.get("content-type") || "application/pdf",
@@ -108,6 +121,7 @@ export async function presignedGetUrl(key, env) {
   const scope   = `${date}/${region}/s3/aws4_request`;
   const cred    = `${env.AWS_ACCESS_KEY_ID}/${scope}`;
 
+  // Build query params — must be sorted for canonical string
   const qp = new URLSearchParams({
     "X-Amz-Algorithm":     "AWS4-HMAC-SHA256",
     "X-Amz-Credential":    cred,
@@ -121,9 +135,12 @@ export async function presignedGetUrl(key, env) {
     .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
     .join("&");
 
-  const canonReq  = ["GET", `/${key}`, canonQuery, `host:${host}\n`, "host", "UNSIGNED-PAYLOAD"].join("\n");
-  const sts       = ["AWS4-HMAC-SHA256", amzDate, scope, await sha256hex(canonReq)].join("\n");
-  const sig       = toHex(await hmacSHA256(await signingKey(env.AWS_SECRET_ACCESS_KEY, date, region), sts));
+  // FIX: use canonicalPath() to properly encode key segments (spaces → %20 etc.)
+  const encodedPath = canonicalPath(key);
 
-  return `https://${host}/${key}?${canonQuery}&X-Amz-Signature=${sig}`;
+  const canonReq = ["GET", encodedPath, canonQuery, `host:${host}\n`, "host", "UNSIGNED-PAYLOAD"].join("\n");
+  const sts      = ["AWS4-HMAC-SHA256", amzDate, scope, await sha256hex(canonReq)].join("\n");
+  const sig      = toHex(await hmacSHA256(await signingKey(env.AWS_SECRET_ACCESS_KEY, date, region), sts));
+
+  return `https://${host}${encodedPath}?${canonQuery}&X-Amz-Signature=${sig}`;
 }
