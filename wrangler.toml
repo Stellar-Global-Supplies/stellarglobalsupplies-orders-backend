@@ -1,0 +1,59 @@
+name                = "sgs-orders-worker"
+main                = "src/index.js"
+compatibility_date  = "2025-04-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev         = true
+
+[observability.logs]
+enabled         = true
+invocation_logs = true
+
+[vars]
+ENVIRONMENT    = "production"
+CORS_ORIGIN    = "https://orders.stellarglobalsupplies.com"
+INVOICE_BUCKET = "stellar-oms-invoices-production"
+AWS_REGION     = "us-east-1"
+
+# ── Cloudflare Secrets Store ───────────────────────────────────────────────────
+# All secrets already stored — no wrangler secret put needed.
+# Store: https://dash.cloudflare.com/d781cda05787a81fa928d810ec63322f/secrets-store/2556bcd9458349f6b4ff2a3fc93bdba1
+
+[[secrets_store_secrets]]
+binding     = "SUPABASE_URL"
+secret_name = "SUPABASE_URL"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
+binding     = "SUPABASE_SERVICE_KEY"
+secret_name = "SUPABASE_SERVICE_KEY"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
+binding     = "GMAIL_CLIENT_ID"
+secret_name = "GMAIL_CLIENT_ID"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
+binding     = "GMAIL_CLIENT_SECRET"
+secret_name = "GMAIL_CLIENT_SECRET"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
+binding     = "GMAIL_REFRESH_TOKEN"
+secret_name = "GMAIL_REFRESH_TOKEN"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
+binding     = "AWS_ACCESS_KEY_ID"
+secret_name = "BEDROCK_ACCESS_KEY_ID"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+[[secrets_store_secrets]]
+binding     = "AWS_SECRET_ACCESS_KEY"
+secret_name = "BEDROCK_SECRET_ACCESS_KEY"
+store_id    = "2556bcd9458349f6b4ff2a3fc93bdba1"
+
+# ── Deployment ─────────────────────────────────────────────────────────────────
+# After wrangler deploy, set in CF Pages → sgs-orders-frontend
+# → Settings → Environment variables → Production:
+#   VITE_API_BASE_URL = https://sgs-orders-worker.<your-subdomain>.workers.dev

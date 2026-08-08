@@ -1,0 +1,542 @@
+{
+    "info": {
+      "name": "SGS Orders Worker — API Tests",
+      "_postman_id": "sgs-orders-worker-v1",
+      "description": "Full test suite for the SGS Orders Cloudflare Worker.\n\nSetup:\n1. Create a Postman Environment called 'SGS Orders Production'\n2. Set variable: base_url = https://sgs-orders-worker.<your-subdomain>.workers.dev\n3. Set variable: auth_token = (paste a valid Supabase JWT here)\n4. order_id and item_id are auto-filled by test scripts.",
+      "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "variable": [
+      { "key": "base_url",   "value": "https://sgs-orders-worker.<your-subdomain>.workers.dev" },
+      { "key": "auth_token", "value": "" },
+      { "key": "order_id",   "value": "" },
+      { "key": "item_id",    "value": "" }
+    ],
+    "item": [
+      {
+        "name": "🟢 Health",
+        "item": [
+          {
+            "name": "GET /health — full status",
+            "request": {
+              "method": "GET",
+              "url": { "raw": "{{base_url}}/health", "host": ["{{base_url}}"], "path": ["health"] }
+            },
+            "event": [{
+              "listen": "test",
+              "script": { "exec": [
+                "pm.test('Status 200 or 207', () => pm.expect([200,207]).to.include(pm.response.code));",
+                "const json = pm.response.json();",
+                "pm.test('Has status field', () => pm.expect(json.status).to.be.oneOf(['ok','degraded']));",
+                "pm.test('Has service name', () => pm.expect(json.service).to.eql('sgs-orders-worker'));",
+                "pm.test('Has timestamp', () => pm.expect(json.timestamp).to.be.a('string'));",
+                "pm.test('Has checks object', () => pm.expect(json.checks).to.be.an('object'));",
+                "pm.test('Supabase check present', () => pm.expect(json.checks.supabase).to.be.a('string'));",
+                "pm.test('S3 check present', () => pm.expect(json.checks.s3).to.be.a('string'));",
+                "pm.test('Gmail check present', () => pm.expect(json.checks.gmail).to.be.a('string'));",
+                "console.log('Health:', JSON.stringify(json, null, 2));"
+              ]}
+            }]
+          }
+        ]
+      },
+      {
+        "name": "📦 Orders",
+        "item": [
+          {
+            "name": "POST /orders — create (single product)",
+            "request": {
+              "method": "POST",
+              "header": [
+                { "key": "Content-Type",  "value": "application/json" },
+                { "key": "Authorization", "value": "Bearer {{auth_token}}" }
+              ],
+              "url": { "raw": "{{base_url}}/orders", "host": ["{{base_url}}"], "path": ["orders"] },
+              "body": { "mode": "raw", "raw": "{\n  \"customer_name\": \"Raj Mehta\",\n  \"phone\": \"9876543210\",\n  \"email\": \"raj@testcompany.com\",\n  \"payment_status\": \"Pending\",\n  \"delivery_timeline\": \"2025-09-15\",\n  \"products\": [\n    {\n      \"product_type\": \"MS Pipe\",\n      \"material\": \"Mild Steel\",\n      \"quantity\": 100,\n      \"unit\": \"KG\",\n      \"unit_cost\": 65,\n      \"sale_cost\": 6500,\n      \"cgst\": 585,\n      \"sgst\": 585,\n      \"description\": \"50mm diameter\"\n    }\n  ]\n}" }
+            },
+            "event": [{
+              "listen": "test",
+              "script": { "exec": [
+                "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                "const json = pm.response.json();",
+                "pm.test('Has order id', () => pm.expect(json.id).to.be.a('string'));",
+                "pm.test('Status is Order Received', () => pm.expect(json.status).to.eql('Order Received'));",
+                "pm.test('Has tracking_token', () => pm.expect(json.tracking_token).to.be.a('string'));",
+                "pm.collectionVariables.set('order_id', json.id);",
+                "pm.collectionVariables.set('tracking_token', json.tracking_token);",
+                "console.log('Saved order_id:', json.id, '| tracking_token:', json.tracking_token);"
+              ]}
+            }]
+          },
+          {
+            "name": "POST /orders — create (multi product)",
+            "request": {
+              "method": "POST",
+              "header": [
+                { "key": "Content-Type",  "value": "application/json" },
+                { "key": "Authorization", "value": "Bearer {{auth_token}}" }
+              ],
+              "url": { "raw": "{{base_url}}/orders", "host": ["{{base_url}}"], "path": ["orders"] },
+              "body": { "mode": "raw", "raw": "{\n  \"customer_name\": \"Priya Shah\",\n  \"phone\": \"9123456789\",\n  \"email\": \"priya@example.com\",\n  \"payment_status\": \"Paid\",\n  \"delivery_timeline\": \"2025-10-01\",\n  \"products\": [\n    {\n      \"product_type\": \"MS Pipe\",\n      \"material\": \"Mild Steel\",\n      \"quantity\": 50,\n      \"unit\": \"KG\",\n      \"unit_cost\": 65,\n      \"sale_cost\": 3250,\n      \"cgst\": 292.5,\n      \"sgst\": 292.5\n    },\n    {\n      \"product_type\": \"MS Flat\",\n      \"material\": \"Mild Steel\",\n      \"quantity\": 30,\n      \"unit\": \"KG\",\n      \"unit_cost\": 72,\n      \"sale_cost\": 2160,\n      \"cgst\": 194.4,\n      \"sgst\": 194.4\n    }\n  ]\n}" }
+            },
+            "event": [{
+              "listen": "test",
+              "script": { "exec": [
+                "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                "pm.test('Has order id', () => pm.expect(pm.response.json().id).to.be.a('string'));"
+              ]}
+            }]
+          },
+          {
+            "name": "POST /orders — missing customer_name (400)",
+            "request": {
+              "method": "POST",
+              "header": [
+                { "key": "Content-Type",  "value": "application/json" },
+                { "key": "Authorization", "value": "Bearer {{auth_token}}" }
+              ],
+              "url": { "raw": "{{base_url}}/orders", "host": ["{{base_url}}"], "path": ["orders"] },
+              "body": { "mode": "raw", "raw": "{\n  \"phone\": \"9876543210\",\n  \"email\": \"test@test.com\",\n  \"products\": [{ \"product_type\": \"Pipe\", \"material\": \"MS\", \"quantity\": 1, \"sale_cost\": 100 }]\n}" }
+            },
+            "event": [{
+              "listen": "test",
+              "script": { "exec": [
+                "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                "pm.test('Error mentions missing field', () => pm.expect(pm.response.json().message).to.include('customer_name'));"
+              ]}
+            }]
+          },
+          {
+            "name": "POST /orders — no products (400)",
+            "request": {
+              "method": "POST",
+              "header": [
+                { "key": "Content-Type",  "value": "application/json" },
+                { "key": "Authorization", "value": "Bearer {{auth_token}}" }
+              ],
+              "url": { "raw": "{{base_url}}/orders", "host": ["{{base_url}}"], "path": ["orders"] },
+              "body": { "mode": "raw", "raw": "{\n  \"customer_name\": \"Test\",\n  \"phone\": \"9876543210\",\n  \"email\": \"t@t.com\",\n  \"products\": []\n}" }
+            },
+            "event": [{
+              "listen": "test",
+              "script": { "exec": [
+                "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                "pm.test('Error mentions products', () => pm.expect(pm.response.json().message).to.include('product'));"
+              ]}
+            }]
+          },
+          {
+            "name": "POST /orders — no auth (401)",
+            "request": {
+              "method": "POST",
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "url": { "raw": "{{base_url}}/orders", "host": ["{{base_url}}"], "path": ["orders"] },
+              "body": { "mode": "raw", "raw": "{}" }
+            },
+            "event": [{
+              "listen": "test",
+              "script": { "exec": ["pm.test('Status 401', () => pm.response.to.have.status(401));"] }
+            }]
+          }
+        ]
+      },
+      {
+        "name": "🔄 Order Status",
+        "item": [
+          {
+            "name": "PATCH /orders/:id/status — Processing",
+            "request": {
+              "method": "PATCH",
+              "header": [
+                { "key": "Content-Type",  "value": "application/json" },
+                { "key": "Authorization", "value": "Bearer {{auth_token}}" }
+              ],
+              "url": { "raw": "{{base_url}}/orders/{{order_id}}/status", "host": ["{{base_url}}"], "path": ["orders","{{order_id}}","status"] },
+              "body": { "mode": "raw", "raw": "{\n  \"status\": \"Processing\",\n  \"payment_status\": \"Partial\"\n}" }
+            },
+            "event": [{
+              "listen": "test",
+              "script": { "exec": [
+                "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                "pm.test('Status is Processing', () => pm.expect(pm.response.json().status).to.eql('Processing'));"
+              ]}
+            }]
+          },
+          {
+            "name": "PATCH /orders/:id/status — invalid transition (400)",
+            "request": {
+              "method": "PATCH",
+              "header": [
+                { "key": "Content-Type",  "value": "application/json" },
+                { "key": "Authorization", "value": "Bearer {{auth_token}}" }
+              ],
+              "url": { "raw": "{{base_url}}/orders/{{order_id}}/status", "host": ["{{base_url}}"], "path": ["orders","{{order_id}}","status"] },
+              "body": { "mode": "raw", "raw": "{\n  \"status\": \"Delivered\"\n}" }
+            },
+            "event": [{
+              "listen": "test",
+              "script": { "exec": [
+                "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                "pm.test('Error mentions transition', () => pm.expect(pm.response.json().message).to.include('transition'));"
+              ]}
+            }]
+          },
+          {
+            "name": "PATCH /orders/:id/status — invalid status value (400)",
+            "request": {
+              "method": "PATCH",
+              "header": [
+                { "key": "Content-Type",  "value": "application/json" },
+                { "key": "Authorization", "value": "Bearer {{auth_token}}" }
+              ],
+              "url": { "raw": "{{base_url}}/orders/{{order_id}}/status", "host": ["{{base_url}}"], "path": ["orders","{{order_id}}","status"] },
+              "body": { "mode": "raw", "raw": "{\n  \"status\": \"Shipped\"\n}" }
+            },
+            "event": [{
+              "listen": "test",
+              "script": { "exec": ["pm.test('Status 400', () => pm.response.to.have.status(400));"] }
+            }]
+          },
+          {
+            "name": "PATCH /orders/:id/status — Ready to Dispatch",
+            "request": {
+              "method": "PATCH",
+              "header": [
+                { "key": "Content-Type",  "value": "application/json" },
+                { "key": "Authorization", "value": "Bearer {{auth_token}}" }
+              ],
+              "url": { "raw": "{{base_url}}/orders/{{order_id}}/status", "host": ["{{base_url}}"], "path": ["orders","{{order_id}}","status"] },
+              "body": { "mode": "raw", "raw": "{\n  \"status\": \"Ready to Dispatch\"\n}" }
+            },
+            "event": [{
+              "listen": "test",
+              "script": { "exec": [
+                "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                "pm.test('Status updated', () => pm.expect(pm.response.json().status).to.eql('Ready to Dispatch'));"
+              ]}
+            }]
+          }
+        ]
+      },
+      {
+        "name": "⏳ Delay & Deliver",
+        "item": [
+          {
+            "name": "PATCH /orders/:id/delay — reschedule delivery",
+            "request": {
+              "method": "PATCH",
+              "header": [
+                { "key": "Content-Type",  "value": "application/json" },
+                { "key": "Authorization", "value": "Bearer {{auth_token}}" }
+              ],
+              "url": { "raw": "{{base_url}}/orders/{{order_id}}/delay", "host": ["{{base_url}}"], "path": ["orders","{{order_id}}","delay"] },
+              "body": { "mode": "raw", "raw": "{\n  \"delivery_timeline\": \"2025-10-30\"\n}" }
+            },
+            "event": [{
+              "listen": "test",
+              "script": { "exec": [
+                "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                "pm.test('delivery_timeline updated', () => pm.expect(pm.response.json().delivery_timeline).to.include('2025-10-30'));"
+              ]}
+            }]
+          },
+          {
+            "name": "PATCH /orders/:id/delay — missing delivery_timeline (400)",
+            "request": {
+              "method": "PATCH",
+              "header": [
+                { "key": "Content-Type",  "value": "application/json" },
+                { "key": "Authorization", "value": "Bearer {{auth_token}}" }
+              ],
+              "url": { "raw": "{{base_url}}/orders/{{order_id}}/delay", "host": ["{{base_url}}"], "path": ["orders","{{order_id}}","delay"] },
+              "body": { "mode": "raw", "raw": "{}" }
+            },
+            "event": [{
+              "listen": "test",
+              "script": { "exec": ["pm.test('Status 400', () => pm.response.to.have.status(400));"] }
+            }]
+          },
+          {
+            "name": "POST /orders/:id/deliver — no invoice (JSON)",
+            "request": {
+              "method": "POST",
+              "header": [
+                { "key": "Content-Type",  "value": "application/json" },
+                { "key": "Authorization", "value": "Bearer {{auth_token}}" }
+              ],
+              "url": { "raw": "{{base_url}}/orders/{{order_id}}/deliver", "host": ["{{base_url}}"], "path": ["orders","{{order_id}}","deliver"] },
+              "body": { "mode": "raw", "raw": "{}" }
+            },
+            "event": [{
+              "listen": "test",
+              "script": { "exec": [
+                "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                "pm.test('Status is Delivered', () => pm.expect(pm.response.json().status).to.eql('Delivered'));"
+              ]}
+            }]
+          },
+          {
+            "name": "POST /orders/:id/deliver — with invoice PDF (multipart)",
+            "request": {
+              "method": "POST",
+              "header": [{ "key": "Authorization", "value": "Bearer {{auth_token}}" }],
+              "url": { "raw": "{{base_url}}/orders/{{order_id}}/deliver", "host": ["{{base_url}}"], "path": ["orders","{{order_id}}","deliver"] },
+              "body": {
+                "mode": "formdata",
+                "formdata": [
+                  { "key": "payment_status", "value": "Paid",         "type": "text" },
+                  { "key": "invoice",        "type": "file", "src": "/path/to/invoice.pdf" }
+                ]
+              }
+            },
+            "event": [{
+              "listen": "test",
+              "script": { "exec": [
+                "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                "const json = pm.response.json();",
+                "pm.test('Status Delivered', () => pm.expect(json.status).to.eql('Delivered'));",
+                "pm.test('invoice_url present', () => pm.expect(json.invoice_url).to.be.a('string'));"
+              ]}
+            }]
+          }
+        ]
+      },
+      {
+        "name": "🔩 Order Items",
+        "item": [
+          {
+            "name": "POST /orders/:id/items — add product",
+            "request": {
+              "method": "POST",
+              "header": [
+                { "key": "Content-Type",  "value": "application/json" },
+                { "key": "Authorization", "value": "Bearer {{auth_token}}" }
+              ],
+              "url": { "raw": "{{base_url}}/orders/{{order_id}}/items", "host": ["{{base_url}}"], "path": ["orders","{{order_id}}","items"] },
+              "body": { "mode": "raw", "raw": "{\n  \"product_type\": \"MS Angle\",\n  \"material\": \"Mild Steel\",\n  \"quantity\": 20,\n  \"unit\": \"KG\",\n  \"unit_cost\": 70,\n  \"sale_cost\": 1400,\n  \"cgst\": 126,\n  \"sgst\": 126,\n  \"description\": \"50x50x5mm\"\n}" }
+            },
+            "event": [{
+              "listen": "test",
+              "script": { "exec": [
+                "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                "const json = pm.response.json();",
+                "pm.test('item has id', () => pm.expect(json.id).to.be.a('string'));",
+                "pm.collectionVariables.set('item_id', json.id);",
+                "console.log('Saved item_id:', json.id);"
+              ]}
+            }]
+          },
+          {
+            "name": "POST /orders/:id/items — missing fields (400)",
+            "request": {
+              "method": "POST",
+              "header": [
+                { "key": "Content-Type",  "value": "application/json" },
+                { "key": "Authorization", "value": "Bearer {{auth_token}}" }
+              ],
+              "url": { "raw": "{{base_url}}/orders/{{order_id}}/items", "host": ["{{base_url}}"], "path": ["orders","{{order_id}}","items"] },
+              "body": { "mode": "raw", "raw": "{\n  \"product_type\": \"Pipe\"\n}" }
+            },
+            "event": [{
+              "listen": "test",
+              "script": { "exec": ["pm.test('Status 400', () => pm.response.to.have.status(400));"] }
+            }]
+          },
+          {
+            "name": "PATCH /orders/:id/items/:itemId — update product",
+            "request": {
+              "method": "PATCH",
+              "header": [
+                { "key": "Content-Type",  "value": "application/json" },
+                { "key": "Authorization", "value": "Bearer {{auth_token}}" }
+              ],
+              "url": { "raw": "{{base_url}}/orders/{{order_id}}/items/{{item_id}}", "host": ["{{base_url}}"], "path": ["orders","{{order_id}}","items","{{item_id}}"] },
+              "body": { "mode": "raw", "raw": "{\n  \"quantity\": 25,\n  \"sale_cost\": 1750,\n  \"description\": \"50x50x5mm — updated qty\"\n}" }
+            },
+            "event": [{
+              "listen": "test",
+              "script": { "exec": [
+                "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                "pm.test('Quantity updated', () => pm.expect(pm.response.json().quantity).to.eql(25));"
+              ]}
+            }]
+          },
+          {
+            "name": "DELETE /orders/:id/items/:itemId — delete product",
+            "request": {
+              "method": "DELETE",
+              "header": [{ "key": "Authorization", "value": "Bearer {{auth_token}}" }],
+              "url": { "raw": "{{base_url}}/orders/{{order_id}}/items/{{item_id}}", "host": ["{{base_url}}"], "path": ["orders","{{order_id}}","items","{{item_id}}"] }
+            },
+            "event": [{
+              "listen": "test",
+              "script": { "exec": [
+                "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                "pm.test('Success message', () => pm.expect(pm.response.json().message).to.include('deleted'));"
+              ]}
+            }]
+          }
+        ]
+      },
+      {
+        "name": "📧 Notifications",
+        "item": [
+          {
+            "name": "POST /orders/:id/notify — status_update",
+            "request": {
+              "method": "POST",
+              "header": [
+                { "key": "Content-Type",  "value": "application/json" },
+                { "key": "Authorization", "value": "Bearer {{auth_token}}" }
+              ],
+              "url": { "raw": "{{base_url}}/orders/{{order_id}}/notify", "host": ["{{base_url}}"], "path": ["orders","{{order_id}}","notify"] },
+              "body": { "mode": "raw", "raw": "{\n  \"type\": \"status_update\"\n}" }
+            },
+            "event": [{
+              "listen": "test",
+              "script": { "exec": [
+                "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                "const json = pm.response.json();",
+                "pm.test('Email sent', () => pm.expect(json.message).to.eql('Email sent'));",
+                "pm.test('Type correct', () => pm.expect(json.type).to.eql('status_update'));"
+              ]}
+            }]
+          },
+          {
+            "name": "POST /orders/:id/notify — confirmation",
+            "request": {
+              "method": "POST",
+              "header": [
+                { "key": "Content-Type",  "value": "application/json" },
+                { "key": "Authorization", "value": "Bearer {{auth_token}}" }
+              ],
+              "url": { "raw": "{{base_url}}/orders/{{order_id}}/notify", "host": ["{{base_url}}"], "path": ["orders","{{order_id}}","notify"] },
+              "body": { "mode": "raw", "raw": "{\n  \"type\": \"confirmation\"\n}" }
+            },
+            "event": [{
+              "listen": "test",
+              "script": { "exec": [
+                "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                "pm.test('Type is confirmation', () => pm.expect(pm.response.json().type).to.eql('confirmation'));"
+              ]}
+            }]
+          }
+        ]
+      },
+      {
+        "name": "🔍 Public Tracking",
+        "item": [
+          {
+            "name": "GET /track/:token — valid token",
+            "request": {
+              "method": "GET",
+              "url": { "raw": "{{base_url}}/track/{{tracking_token}}", "host": ["{{base_url}}"], "path": ["track","{{tracking_token}}"] }
+            },
+            "event": [{
+              "listen": "test",
+              "script": { "exec": [
+                "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                "const json = pm.response.json();",
+                "pm.test('Has order id', () => pm.expect(json.id).to.be.a('string'));",
+                "pm.test('Has order_items array', () => pm.expect(json.order_items).to.be.an('array'));",
+                "pm.test('No email in response (public safety)', () => pm.expect(json.email).to.be.undefined);",
+                "pm.test('No phone in response (public safety)', () => pm.expect(json.phone).to.be.undefined);"
+              ]}
+            }]
+          },
+          {
+            "name": "GET /track/:token — invalid UUID format (400)",
+            "request": {
+              "method": "GET",
+              "url": { "raw": "{{base_url}}/track/not-a-uuid", "host": ["{{base_url}}"], "path": ["track","not-a-uuid"] }
+            },
+            "event": [{
+              "listen": "test",
+              "script": { "exec": ["pm.test('Status 400', () => pm.response.to.have.status(400));"] }
+            }]
+          },
+          {
+            "name": "GET /track/:token — unknown token (404)",
+            "request": {
+              "method": "GET",
+              "url": { "raw": "{{base_url}}/track/00000000-0000-4000-a000-000000000000", "host": ["{{base_url}}"], "path": ["track","00000000-0000-4000-a000-000000000000"] }
+            },
+            "event": [{
+              "listen": "test",
+              "script": { "exec": ["pm.test('Status 404', () => pm.response.to.have.status(404));"] }
+            }]
+          }
+        ]
+      },
+      {
+        "name": "🔒 CORS",
+        "item": [
+          {
+            "name": "OPTIONS /orders — preflight",
+            "request": {
+              "method": "OPTIONS",
+              "header": [
+                { "key": "Origin", "value": "https://orders.stellarglobalsupplies.com" },
+                { "key": "Access-Control-Request-Method", "value": "POST" },
+                { "key": "Access-Control-Request-Headers", "value": "Content-Type,Authorization" }
+              ],
+              "url": { "raw": "{{base_url}}/orders", "host": ["{{base_url}}"], "path": ["orders"] }
+            },
+            "event": [{
+              "listen": "test",
+              "script": { "exec": [
+                "pm.test('Status 204', () => pm.response.to.have.status(204));",
+                "pm.test('Allow-Origin header present', () => pm.expect(pm.response.headers.get('Access-Control-Allow-Origin')).to.exist);",
+                "pm.test('Allow-Methods includes POST', () => pm.expect(pm.response.headers.get('Access-Control-Allow-Methods')).to.include('POST'));"
+              ]}
+            }]
+          },
+          {
+            "name": "OPTIONS /track/:token — preflight (public *)",
+            "request": {
+              "method": "OPTIONS",
+              "header": [
+                { "key": "Origin", "value": "https://anydomain.com" },
+                { "key": "Access-Control-Request-Method", "value": "GET" }
+              ],
+              "url": { "raw": "{{base_url}}/track/00000000-0000-4000-a000-000000000000", "host": ["{{base_url}}"], "path": ["track","00000000-0000-4000-a000-000000000000"] }
+            },
+            "event": [{
+              "listen": "test",
+              "script": { "exec": [
+                "pm.test('Status 204', () => pm.response.to.have.status(204));",
+                "pm.test('Allow-Origin is *', () => pm.expect(pm.response.headers.get('Access-Control-Allow-Origin')).to.eql('*'));"
+              ]}
+            }]
+          }
+        ]
+      },
+      {
+        "name": "❌ Error Cases",
+        "item": [
+          {
+            "name": "GET /unknown-route (404)",
+            "request": {
+              "method": "GET",
+              "url": { "raw": "{{base_url}}/api/does-not-exist", "host": ["{{base_url}}"], "path": ["api","does-not-exist"] }
+            },
+            "event": [{
+              "listen": "test",
+              "script": { "exec": ["pm.test('Status 404', () => pm.response.to.have.status(404));"] }
+            }]
+          },
+          {
+            "name": "GET /orders (405 — method not allowed)",
+            "request": {
+              "method": "GET",
+              "header": [{ "key": "Authorization", "value": "Bearer {{auth_token}}" }],
+              "url": { "raw": "{{base_url}}/orders", "host": ["{{base_url}}"], "path": ["orders"] }
+            },
+            "event": [{
+              "listen": "test",
+              "script": { "exec": ["pm.test('Status 405', () => pm.response.to.have.status(405));"] }
+            }]
+          }
+        ]
+      }
+    ]
+  }
