@@ -3,7 +3,9 @@
  * PATCH /orders/:id/delay    — reschedule delivery date
  * POST  /orders/:id/deliver  — mark delivered + upload invoice (multipart)
  *
- * Port of Lambda update-order-status/index.js
+ * BUG FIX: emails were fire-and-forget IIFEs — CF Workers kills unawaited
+ * promises after Response is returned. All emails are now awaited before
+ * returning the response so they always send.
  */
 
 import { getUser, db, dbOne } from "../supabase.js";
@@ -27,7 +29,7 @@ async function fetchItems(orderId, env) {
   } catch { return []; }
 }
 
-// ── PATCH /orders/:id/delay ────────────────────────────────────────────────────
+// ── PATCH /orders/:id/delay ───────────────────────────────────────────────────
 
 export async function delayOrder(req, env, orderId) {
   const token = (req.headers.get("authorization") || "").replace("Bearer ", "");
@@ -49,18 +51,19 @@ export async function delayOrder(req, env, orderId) {
     return jsonResponse({ message: "Failed to delay order", detail: err.message }, 500, env);
   }
 
-  (async () => {
-    try {
-      const items = await fetchItems(orderId, env);
-      const { subject, html, text } = buildDelayNotificationEmail(updated, items);
-      await sendEmail({ to: updated.email, subject, html, text }, env);
-    } catch (e) { console.error("Delay email (non-fatal):", e.message); }
-  })();
+  // Awaited — CF Workers kills unawaited promises after Response is returned
+  try {
+    const items = await fetchItems(orderId, env);
+    const { subject, html, text } = buildDelayNotificationEmail(updated, items);
+    await sendEmail({ to: updated.email, subject, html, text }, env);
+  } catch (e) {
+    console.error("Delay email failed (non-fatal):", e.message);
+  }
 
   return jsonResponse(updated, 200, env);
 }
 
-// ── POST /orders/:id/deliver ───────────────────────────────────────────────────
+// ── POST /orders/:id/deliver ──────────────────────────────────────────────────
 
 export async function deliverOrder(req, env, orderId) {
   const token = (req.headers.get("authorization") || "").replace("Bearer ", "");
@@ -79,10 +82,10 @@ export async function deliverOrder(req, env, orderId) {
       const invoiceFile = formData.get("invoice");
 
       if (invoiceFile && invoiceFile.size > 0) {
-        const filename   = invoiceFile.name || `invoice_${Date.now()}.pdf`;
-        const mimeType   = invoiceFile.type || "application/pdf";
-        const key        = `invoices/${orderId}/${Date.now()}_${filename}`;
-        const buffer     = await invoiceFile.arrayBuffer();
+        const filename = invoiceFile.name || `invoice_${Date.now()}.pdf`;
+        const mimeType = invoiceFile.type || "application/pdf";
+        const key      = `invoices/${orderId}/${Date.now()}_${filename}`;
+        const buffer   = await invoiceFile.arrayBuffer();
 
         try {
           await putToS3(key, buffer, mimeType, env);
@@ -117,13 +120,14 @@ export async function deliverOrder(req, env, orderId) {
     return jsonResponse({ message: "Failed to mark as delivered", detail: err.message }, 500, env);
   }
 
-  (async () => {
-    try {
-      const items = await fetchItems(orderId, env);
-      const { subject, html, text } = buildStatusUpdateEmail(updated, items);
-      await sendEmail({ to: updated.email, subject, html, text, invoiceS3Key }, env);
-    } catch (e) { console.error("Delivery email (non-fatal):", e.message); }
-  })();
+  // Awaited — CF Workers kills unawaited promises after Response is returned
+  try {
+    const items = await fetchItems(orderId, env);
+    const { subject, html, text } = buildStatusUpdateEmail(updated, items);
+    await sendEmail({ to: updated.email, subject, html, text, invoiceS3Key }, env);
+  } catch (e) {
+    console.error("Delivery email failed (non-fatal):", e.message);
+  }
 
   return jsonResponse(updated, 200, env);
 }
@@ -149,7 +153,7 @@ export async function updateStatus(req, env, orderId) {
 
   const expectedNext = NEXT_STATUS[current.status];
   if (status !== expectedNext)
-    return jsonResponse({ message: `Cannot transition "${current.status}" → "${status}". Expected: "${expectedNext||'none'}"` }, 400, env);
+    return jsonResponse({ message: `Cannot transition "${current.status}" → "${status}". Expected: "${expectedNext || "none"}"` }, 400, env);
 
   const updatePayload = { status, updated_at: new Date().toISOString(), updated_by: user.id };
   if (payment_status && VALID_PAYMENT.includes(payment_status)) updatePayload.payment_status = payment_status;
@@ -158,13 +162,14 @@ export async function updateStatus(req, env, orderId) {
   try { updated = await dbOne("PATCH", "orders", env, updatePayload, `id=eq.${orderId}`); }
   catch (err) { return jsonResponse({ message: "Failed to update order", detail: err.message }, 500, env); }
 
-  (async () => {
-    try {
-      const items = await fetchItems(orderId, env);
-      const { subject, html, text } = buildStatusUpdateEmail(updated, items);
-      await sendEmail({ to: updated.email, subject, html, text }, env);
-    } catch (e) { console.error("Status email (non-fatal):", e.message); }
-  })();
+  // Awaited — CF Workers kills unawaited promises after Response is returned
+  try {
+    const items = await fetchItems(orderId, env);
+    const { subject, html, text } = buildStatusUpdateEmail(updated, items);
+    await sendEmail({ to: updated.email, subject, html, text }, env);
+  } catch (e) {
+    console.error("Status email failed (non-fatal):", e.message);
+  }
 
   return jsonResponse(updated, 200, env);
 }
