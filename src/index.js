@@ -7,6 +7,7 @@
  * Routes:
  *   GET    /health                         → health check + dependency status
  *   POST   /orders                         → create order (auth)
+ *   PATCH  /orders/:id                     → edit order header fields (auth)
  *   PATCH  /orders/:id/status              → generic status transition (auth)
  *   PATCH  /orders/:id/delay               → reschedule delivery (auth)
  *   POST   /orders/:id/deliver             → mark delivered + invoice upload (auth, multipart)
@@ -21,6 +22,7 @@ import { resolveSecrets }                               from "./secrets.js";
 import { createOrder }                                  from "./routes/createOrder.js";
 import { updateStatus, delayOrder, deliverOrder }       from "./routes/updateOrderStatus.js";
 import { addItem, updateItem, deleteItem }               from "./routes/orderItems.js";
+import { editOrder }                                    from "./routes/editOrder.js";
 import { trackOrder }                                   from "./routes/trackOrder.js";
 import { sendNotification }                             from "./routes/sendNotification.js";
 import { jsonResponse, preflightResponse }              from "./cors.js";
@@ -69,6 +71,10 @@ export default {
 
     // ── POST /orders ──────────────────────────────────────────────────────────
     if (path === "/orders" && method === "POST") return createOrder(request, secrets);
+
+    // ── PATCH /orders/:id — edit order header fields ───────────────────────────
+    const orderMatch = path.match(/^\/orders\/([^/]+)$/);
+    if (orderMatch && method === "PATCH") return editOrder(request, secrets, orderMatch[1]);
 
     // ── /orders/:id/items/:itemId ─────────────────────────────────────────────
     const itemMatch = path.match(/^\/orders\/([^/]+)\/items\/([^/]+)$/);
