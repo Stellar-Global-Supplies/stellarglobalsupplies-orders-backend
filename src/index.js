@@ -6,6 +6,8 @@
  *
  * Routes:
  *   GET    /health                         → health check + dependency status
+ *   GET    /orders/stats                   → order aggregates (no auth, server-to-server only)
+ *   GET    /orders/:id/summary             → single order summary (no auth, server-to-server only)
  *   POST   /orders                         → create order (auth)
  *   PATCH  /orders/:id                     → edit order header fields (auth)
  *   PATCH  /orders/:id/status              → generic status transition (auth)
@@ -25,6 +27,7 @@ import { addItem, updateItem, deleteItem }               from "./routes/orderIte
 import { editOrder }                                    from "./routes/editOrder.js";
 import { trackOrder }                                   from "./routes/trackOrder.js";
 import { sendNotification }                             from "./routes/sendNotification.js";
+import { getOrderStats, getOrderSummary }               from "./routes/orderStats.js";
 import { jsonResponse, preflightResponse }              from "./cors.js";
 
 export default {
@@ -68,6 +71,13 @@ export default {
     // ── GET /track/:token ─────────────────────────────────────────────────────
     const trackMatch = path.match(/^\/track\/([^/]+)$/);
     if (trackMatch && method === "GET") return trackOrder(request, secrets, trackMatch[1]);
+
+    // ── GET /orders/stats — read-only aggregates, called by the AI widget ──────
+    if (path === "/orders/stats" && method === "GET") return getOrderStats(request, secrets);
+
+    // ── GET /orders/:id/summary — read-only single-order summary, AI widget ────
+    const summaryMatch = path.match(/^\/orders\/([^/]+)\/summary$/);
+    if (summaryMatch && method === "GET") return getOrderSummary(request, secrets, summaryMatch[1]);
 
     // ── POST /orders ──────────────────────────────────────────────────────────
     if (path === "/orders" && method === "POST") return createOrder(request, secrets);
