@@ -7,6 +7,7 @@
  * Routes:
  *   GET    /health                         → health check + dependency status
  *   GET    /orders/stats                   → order aggregates (no auth, server-to-server only)
+ *   GET    /orders/list                    → order records w/ line items (no auth, server-to-server only)
  *   GET    /orders/:id/summary             → single order summary (no auth, server-to-server only)
  *   POST   /orders                         → create order (auth)
  *   PATCH  /orders/:id                     → edit order header fields (auth)
@@ -27,7 +28,7 @@ import { addItem, updateItem, deleteItem }               from "./routes/orderIte
 import { editOrder }                                    from "./routes/editOrder.js";
 import { trackOrder }                                   from "./routes/trackOrder.js";
 import { sendNotification }                             from "./routes/sendNotification.js";
-import { getOrderStats, getOrderSummary }               from "./routes/orderStats.js";
+import { getOrderStats, getOrderSummary, listOrders } from "./routes/orderStats.js";
 import { jsonResponse, preflightResponse }              from "./cors.js";
 
 export default {
@@ -74,6 +75,9 @@ export default {
 
     // ── GET /orders/stats — read-only aggregates, called by the AI widget ──────
     if (path === "/orders/stats" && method === "GET") return getOrderStats(request, secrets);
+
+    // ── GET /orders/list — read-only order records w/ items, AI widget ─────────
+    if (path === "/orders/list" && method === "GET") return listOrders(request, secrets);
 
     // ── GET /orders/:id/summary — read-only single-order summary, AI widget ────
     const summaryMatch = path.match(/^\/orders\/([^/]+)\/summary$/);
